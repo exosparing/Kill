@@ -17,14 +17,14 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
 app.config['SESSION_COOKIE_SECURE'] = False
 
 # =========================================================================
-# ✅ [여기를 본인 정보로 정확히 채우세요!]
+# ✅ Render 환경변수에서 자동으로 읽어오도록 설정
 # =========================================================================
-CLIENT_ID = "여기에_디스코드_CLIENT_ID_입력"
-CLIENT_SECRET = "여기에_디스코드_CLIENT_SECRET_입력"
-DISCORD_WEBHOOK_URL = "여기에_관리자_채널_웹훅_URL_입력"
-DISCORD_BOT_TOKEN = "여기에_디스코드_봇_TOKEN_입력"
-GUILD_ID = "여기에_서버_ID_입력"
-VERIFIED_ROLE_ID = "여기에_인증완료_ROLE_ID_입력"
+CLIENT_ID = os.getenv("CLIENT_ID")
+CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+GUILD_ID = os.getenv("GUILD_ID")
+VERIFIED_ROLE_ID = os.getenv("VERIFIED_ROLE_ID")
 REDIRECT_URI = "https://kill-xqmz.onrender.com/callback"
 
 # ✅ 일반 유저에게 보여줄 메시지 (이미지 스타일)
@@ -128,11 +128,11 @@ def is_blacklisted(discord_id=None, ip_address=None):
 
 # ✅ 역할 자동 부여
 def give_role_to_user(discord_id):
-    if not DISCORD_BOT_TOKEN or "여기에_" in DISCORD_BOT_TOKEN:
+    if not DISCORD_BOT_TOKEN:
         return False
-    if not GUILD_ID or "여기에_" in GUILD_ID:
+    if not GUILD_ID:
         return False
-    if not VERIFIED_ROLE_ID or "여기에_" in VERIFIED_ROLE_ID:
+    if not VERIFIED_ROLE_ID:
         return False
     try:
         url = f"https://discord.com/api/v10/guilds/{GUILD_ID}/members/{discord_id}/roles/{VERIFIED_ROLE_ID}"
@@ -156,7 +156,7 @@ def save_user_to_db(user_data, ip, isp, location, ua, role_given=0):
 
 # ✅ 관리자에게 보내는 웹훅 (전체 정보 포함)
 def send_admin_webhook(user_data, ip, isp, location, user_agent, is_vpn=False, role_given=False):
-    if not DISCORD_WEBHOOK_URL or "여기에_" in DISCORD_WEBHOOK_URL:
+    if not DISCORD_WEBHOOK_URL:
         return
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     user_email = user_data.get('email', '공개되지 않음')
@@ -196,11 +196,16 @@ def make_session_permanent():
 # ✅ 관리자 권한 확인
 def is_admin_user(user):
     try:
-        if DISCORD_WEBHOOK_URL and "여기에_" not in DISCORD_WEBHOOK_URL:
-            webhook_info = requests.get(DISCORD_WEBHOOK_URL.split('/')[0] + '//' + DISCORD_WEBHOOK_URL.split('/')[2] + '/api/webhooks/' + '/'.join(DISCORD_WEBHOOK_URL.split('/')[4:]), timeout=3).json()
-            creator_id = webhook_info.get('user', {}).get('id')
-            if creator_id and str(user.get('id')) == str(creator_id):
-                return True
+        if DISCORD_WEBHOOK_URL:
+            parts = DISCORD_WEBHOOK_URL.split('/')
+            if len(parts) >= 5:
+                base = parts[0] + '//' + parts[2]
+                webhook_id = parts[4]
+                url = f"{base}/api/webhooks/{webhook_id}"
+                webhook_info = requests.get(url, timeout=3).json()
+                creator_id = webhook_info.get('user', {}).get('id')
+                if creator_id and str(user.get('id')) == str(creator_id):
+                    return True
     except:
         pass
     return False
@@ -536,5 +541,4 @@ def logout():
 
 if __name__ == '__main__':
     init_db()
-    print("✅ 인증 시스템 시작: http://localhost:5000")
     app.run(host='0.0.0.0', port=5000, debug=True)
