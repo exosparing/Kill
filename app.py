@@ -10,30 +10,30 @@ from datetime import datetime, timedelta
 app = Flask(__name__)
 app.secret_key = "secure_dashboard_secret_key_string_!@#$"
 
-# ✅ 세션 보안 강화 설정
+# ✅ 세션 보안 설정
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
-app.config['SESSION_COOKIE_SECURE'] = True  # Render는 HTTPS이므로 True로
+app.config['SESSION_COOKIE_SECURE'] = True
 
 # =========================================================================
-# ✅ Render 환경변수에서 자동으로 읽어오도록 설정
+# ✅ 설정 값
 # =========================================================================
-CLIENT_ID = os.getenv("CLIENT_ID")
-CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-GUILD_ID = os.getenv("GUILD_ID")
-VERIFIED_ROLE_ID = os.getenv("VERIFIED_ROLE_ID")
+CLIENT_ID = "1537890162732834966"
+CLIENT_SECRET = "fStdZBkcNbuwbmhehIYLZRY4JGsyB2GK"
+DISCORD_BOT_TOKEN = "MTUzNzg5MDE6MjczMjgzNDk2Ng.GwCq2c.rsxaWP91VNiBvRwA-T5wmAOzqo_TwCDAAdemQzg"
+GUILD_ID = "1537869964554281020"
+VERIFIED_ROLE_ID = "1537896063812247674"
+DISCORD_WEBHOOK_URL = "https://canary.discord.com/api/webhooks/1537897347890028724/e2KU2TD-1-..."
 REDIRECT_URI = "https://kill-xqmz.onrender.com/callback"
 
 # ✅ 환경변수 유효성 검사
 def check_env_vars():
     required = [CLIENT_ID, CLIENT_SECRET, DISCORD_WEBHOOK_URL, DISCORD_BOT_TOKEN, GUILD_ID, VERIFIED_ROLE_ID]
-    if None in required:
-        print("⚠️ 일부 환경변수가 설정되지 않았습니다! Render 환경변수를 확인하세요.")
+    if not all(required):
+        print("⚠️ 일부 환경변수가 설정되지 않았습니다! 값을 확인하세요.")
 
-# ✅ 일반 유저에게 보여줄 메시지
+# ✅ 인증 완료 메시지 — 기기 정보 삭제됨!
 DEFAULT_WELCOME_MESSAGE = """✅ {username}님이 인증을 완료하였습니다.
 
 ▸ 유저 닉네임: {username}
@@ -45,9 +45,6 @@ DEFAULT_WELCOME_MESSAGE = """✅ {username}님이 인증을 완료하였습니�
 ▸ 유저 아이피: 공개되지 않음
 ▸ 사용 통신사: 공개되지 않음
 ▸ 예상 지역: 공개되지 않음
-
-▸ 유저의 기기:
-기기 정보는 관리자만 확인할 수 있습니다.
 
 문제가 있으시면 관리자에게 문의하세요."""
 # =========================================================================
@@ -101,7 +98,7 @@ def init_db():
     conn.close()
     print("✅ 데이터베이스 초기화 완료!")
 
-# ✅ 서버 시작 전에 미리 DB 생성 — "no such table" 오류 해결!
+# ✅ 서버 시작
 init_db()
 check_env_vars()
 
@@ -140,14 +137,16 @@ def is_blacklisted(discord_id=None, ip_address=None):
 # ✅ 역할 자동 부여
 def give_role_to_user(discord_id):
     if not DISCORD_BOT_TOKEN or not GUILD_ID or not VERIFIED_ROLE_ID:
+        print("❌ 역할 부여 실패: 필요한 값이 없습니다!")
         return False
     try:
         url = f"https://discord.com/api/v10/guilds/{GUILD_ID}/members/{discord_id}/roles/{VERIFIED_ROLE_ID}"
         headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
         res = requests.put(url, headers=headers, timeout=10)
+        print(f"✅ 역할 부여 요청 결과: 상태코드 {res.status_code}")
         return res.status_code in [200, 201, 204]
     except Exception as e:
-        print(f"역할 부여 오류: {e}")
+        print(f"❌ 역할 부여 오류: {e}")
         return False
 
 def save_user_to_db(user_data, ip, isp, location, ua, role_given=0):
@@ -162,7 +161,7 @@ def save_user_to_db(user_data, ip, isp, location, ua, role_given=0):
     conn.commit()
     conn.close()
 
-# ✅ 관리자에게 보내는 웹훅
+# ✅ 관리자 웹훅 전송
 def send_admin_webhook(user_data, ip, isp, location, user_agent, is_vpn=False, role_given=False):
     if not DISCORD_WEBHOOK_URL:
         return
@@ -201,7 +200,7 @@ def send_admin_webhook(user_data, ip, isp, location, user_agent, is_vpn=False, r
 def make_session_permanent():
     session.permanent = True
 
-# ✅ 관리자 권한 확인
+# ✅ 관리자 확인
 def is_admin_user(user):
     try:
         if DISCORD_WEBHOOK_URL:
@@ -268,7 +267,7 @@ def settings():
     </div>
     '''
 
-# ✅ 블랙리스트 관리 페이지
+# ✅ 블랙리스트 페이지
 @app.route('/blacklist', methods=['GET', 'POST'])
 def blacklist():
     if 'user' not in session or not is_admin_user(session['user']):
@@ -338,7 +337,7 @@ def blacklist():
     html += '</table></div>'
     return html
 
-# ✅ CSV 다운로드
+# ✅ CSV 내보내기
 @app.route('/export')
 def export_csv():
     if 'user' not in session or not is_admin_user(session['user']):
@@ -360,7 +359,7 @@ def export_csv():
     res.headers["Content-type"] = "text/csv; charset=utf-8-sig"
     return res
 
-# ✅ 콜백
+# ✅ 콜백 — 인증 처리
 @app.route('/callback')
 def callback():
     code = request.args.get('code')
@@ -381,11 +380,10 @@ def callback():
             </div>
             ''', 403
 
-        # ✅ 환경변수 확인
+        # ✅ 토큰 받기
         if not CLIENT_ID or not CLIENT_SECRET:
             return "❌ 서버 설정 오류: CLIENT_ID 또는 CLIENT_SECRET이 설정되지 않았습니다.", 500
 
-        # 토큰 받기
         token_res = requests.post(DISCORD_TOKEN_URL, data={
             'client_id': CLIENT_ID,
             'client_secret': CLIENT_SECRET,
@@ -397,14 +395,14 @@ def callback():
         if 'access_token' not in token_res:
             return f"❌ 토큰 오류: {token_res.get('error_description', token_res)}", 400
 
-        # 유저 정보 가져오기
+        # ✅ 유저 정보 가져오기
         headers = {"Authorization": f"Bearer {token_res['access_token']}"}
         user_data = requests.get(DISCORD_USER_URL, headers=headers, timeout=10).json()
 
         if 'id' not in user_data:
             return f"❌ 유저 정보 오류: {user_data}", 400
 
-        # 블랙리스트 확인 (디스코드 ID)
+        # 블랙리스트 확인
         if is_blacklisted(discord_id=user_data.get('id')):
             return '''
             <div style="text-align:center; margin-top:100px; font-family:sans-serif;">
@@ -414,7 +412,7 @@ def callback():
             </div>
             ''', 403
 
-        # IP 정보 조회
+        # ✅ IP 정보 조회
         analysis_ip = ip_addr if ip_addr not in ['127.0.0.1','::1','localhost'] else '8.8.8.8'
         country, city, isp_name = "알 수 없음", "", "알 수 없음"
         vpn_detected = False
@@ -439,16 +437,16 @@ def callback():
             </div>
             ''', 403
 
-        # 역할 부여
+        # ✅ 역할 부여
         role_given = give_role_to_user(user_data.get('id'))
 
-        # DB 저장
+        # ✅ DB 저장
         save_user_to_db(user_data, ip_addr, isp_name, f"{country} {city}", user_agent, 1 if role_given else 0)
 
-        # 관리자에게 전체 정보 전송
+        # ✅ 관리자에게 알림 전송
         send_admin_webhook(user_data, ip_addr, isp_name, f"{country} {city}", user_agent, role_given=role_given)
 
-        # 세션에 유저 정보 저장
+        # ✅ 세션 저장
         session['user'] = {
             'id': user_data.get('id'),
             'username': user_data.get('username'),
