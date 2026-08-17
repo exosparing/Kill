@@ -14,7 +14,7 @@ app.secret_key = "secure_dashboard_secret_key_string_!@#$"
 CLIENT_ID = "여기에_디스코드_CLIENT_ID_입력"
 CLIENT_SECRET = "여기에_디스코드_CLIENT_SECRET_입력"
 DISCORD_WEBHOOK_URL = "여기에_관리자_채널_웹훅_URL_입력"
-REDIRECT_URI = "http://localhost:5000/callback"
+REDIRECT_URI = "https://kill-xmrr.onrender.com/callback"
 # =========================================================================
 
 # ✅ 디스코드 OAuth2 공식 주소
