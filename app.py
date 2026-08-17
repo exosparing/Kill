@@ -25,7 +25,7 @@ DISCORD_WEBHOOK_URL = "여기에_관리자_채널_웹훅_URL_입력"
 DISCORD_BOT_TOKEN = "여기에_디스코드_봇_TOKEN_입력"
 GUILD_ID = "여기에_서버_ID_입력"
 VERIFIED_ROLE_ID = "여기에_인증완료_ROLE_ID_입력"
-REDIRECT_URI = "https://kill-xqmz.onrender.com/callback"
+https://kill-xqmz.onrender.com/callback
 
 # ✅ 일반 유저에게 보여줄 메시지 (이미지 스타일)
 DEFAULT_WELCOME_MESSAGE = """✅ {username}님이 인증을 완료하였습니다.
