@@ -14,7 +14,7 @@ app.secret_key = "secure_dashboard_secret_key_string_!@#$"
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
-app.config['SESSION_COOKIE_SECURE'] = False
+app.config['SESSION_COOKIE_SECURE'] = True  # Render는 HTTPS이므로 True로
 
 # =========================================================================
 # ✅ Render 환경변수에서 자동으로 읽어오도록 설정
@@ -27,7 +27,13 @@ GUILD_ID = os.getenv("GUILD_ID")
 VERIFIED_ROLE_ID = os.getenv("VERIFIED_ROLE_ID")
 REDIRECT_URI = "https://kill-xqmz.onrender.com/callback"
 
-# ✅ 일반 유저에게 보여줄 메시지 (이미지 스타일)
+# ✅ 환경변수 유효성 검사
+def check_env_vars():
+    required = [CLIENT_ID, CLIENT_SECRET, DISCORD_WEBHOOK_URL, DISCORD_BOT_TOKEN, GUILD_ID, VERIFIED_ROLE_ID]
+    if None in required:
+        print("⚠️ 일부 환경변수가 설정되지 않았습니다! Render 환경변수를 확인하세요.")
+
+# ✅ 일반 유저에게 보여줄 메시지
 DEFAULT_WELCOME_MESSAGE = """✅ {username}님이 인증을 완료하였습니다.
 
 ▸ 유저 닉네임: {username}
@@ -93,6 +99,11 @@ def init_db():
     
     conn.commit()
     conn.close()
+    print("✅ 데이터베이스 초기화 완료!")
+
+# ✅ 서버 시작 전에 미리 DB 생성 — "no such table" 오류 해결!
+init_db()
+check_env_vars()
 
 def get_setting(key, default=None):
     conn = sqlite3.connect("management.db")
@@ -128,18 +139,15 @@ def is_blacklisted(discord_id=None, ip_address=None):
 
 # ✅ 역할 자동 부여
 def give_role_to_user(discord_id):
-    if not DISCORD_BOT_TOKEN:
-        return False
-    if not GUILD_ID:
-        return False
-    if not VERIFIED_ROLE_ID:
+    if not DISCORD_BOT_TOKEN or not GUILD_ID or not VERIFIED_ROLE_ID:
         return False
     try:
         url = f"https://discord.com/api/v10/guilds/{GUILD_ID}/members/{discord_id}/roles/{VERIFIED_ROLE_ID}"
         headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
-        res = requests.put(url, headers=headers)
+        res = requests.put(url, headers=headers, timeout=10)
         return res.status_code in [200, 201, 204]
-    except:
+    except Exception as e:
+        print(f"역할 부여 오류: {e}")
         return False
 
 def save_user_to_db(user_data, ip, isp, location, ua, role_given=0):
@@ -154,7 +162,7 @@ def save_user_to_db(user_data, ip, isp, location, ua, role_given=0):
     conn.commit()
     conn.close()
 
-# ✅ 관리자에게 보내는 웹훅 (전체 정보 포함)
+# ✅ 관리자에게 보내는 웹훅
 def send_admin_webhook(user_data, ip, isp, location, user_agent, is_vpn=False, role_given=False):
     if not DISCORD_WEBHOOK_URL:
         return
@@ -186,8 +194,8 @@ def send_admin_webhook(user_data, ip, isp, location, user_agent, is_vpn=False, r
     }
     try:
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]}, timeout=5)
-    except:
-        pass
+    except Exception as e:
+        print(f"웹훅 전송 오류: {e}")
 
 @app.before_request
 def make_session_permanent():
@@ -206,8 +214,8 @@ def is_admin_user(user):
                 creator_id = webhook_info.get('user', {}).get('id')
                 if creator_id and str(user.get('id')) == str(creator_id):
                     return True
-    except:
-        pass
+    except Exception as e:
+        print(f"관리자 확인 오류: {e}")
     return False
 
 @app.route('/')
@@ -275,7 +283,6 @@ def blacklist():
         if d_id or ip_addr:
             cursor.execute("INSERT INTO blacklist (discord_id, ip_address, reason) VALUES (?, ?, ?)", (d_id if d_id else None, ip_addr if ip_addr else None, reason))
             conn.commit()
-        # 삭제
         if request.form.get('del_id'):
             cursor.execute("DELETE FROM blacklist WHERE id = ?", (request.form.get('del_id'),))
             conn.commit()
@@ -358,7 +365,7 @@ def export_csv():
 def callback():
     code = request.args.get('code')
     if not code:
-        return "인증 실패", 400
+        return "❌ 인증 실패: 인증 코드가 없습니다.", 400
 
     try:
         ip_addr = request.headers.get("X-Forwarded-For", request.remote_addr).split(',')[0].strip()
@@ -370,8 +377,13 @@ def callback():
             <div style="text-align:center; margin-top:100px; font-family:sans-serif;">
                 <h2 style="color:red;">🚫 인증이 거부되었습니다</h2>
                 <p>차단된 IP에서 접속하셨습니다.</p>
+                <a href="/" style="color:#5865F2;">← 돌아가기</a>
             </div>
             ''', 403
+
+        # ✅ 환경변수 확인
+        if not CLIENT_ID or not CLIENT_SECRET:
+            return "❌ 서버 설정 오류: CLIENT_ID 또는 CLIENT_SECRET이 설정되지 않았습니다.", 500
 
         # 토큰 받기
         token_res = requests.post(DISCORD_TOKEN_URL, data={
@@ -380,14 +392,17 @@ def callback():
             'grant_type': 'authorization_code',
             'code': code,
             'redirect_uri': REDIRECT_URI
-        }).json()
+        }, timeout=10).json()
 
         if 'access_token' not in token_res:
-            return f"토큰 오류: {token_res}", 400
+            return f"❌ 토큰 오류: {token_res.get('error_description', token_res)}", 400
 
         # 유저 정보 가져오기
         headers = {"Authorization": f"Bearer {token_res['access_token']}"}
-        user_data = requests.get(DISCORD_USER_URL, headers=headers).json()
+        user_data = requests.get(DISCORD_USER_URL, headers=headers, timeout=10).json()
+
+        if 'id' not in user_data:
+            return f"❌ 유저 정보 오류: {user_data}", 400
 
         # 블랙리스트 확인 (디스코드 ID)
         if is_blacklisted(discord_id=user_data.get('id')):
@@ -395,6 +410,7 @@ def callback():
             <div style="text-align:center; margin-top:100px; font-family:sans-serif;">
                 <h2 style="color:red;">🚫 인증이 거부되었습니다</h2>
                 <p>차단된 계정입니다.</p>
+                <a href="/" style="color:#5865F2;">← 돌아가기</a>
             </div>
             ''', 403
 
@@ -419,6 +435,7 @@ def callback():
             <div style="text-align:center; margin-top:100px; font-family:sans-serif;">
                 <h2 style="color:#e74c3c;">⚠️ VPN/프록시가 감지되었습니다</h2>
                 <p>일반 인터넷 환경에서 다시 시도해주세요.</p>
+                <a href="/" style="color:#5865F2;">← 돌아가기</a>
             </div>
             ''', 403
 
@@ -441,7 +458,7 @@ def callback():
         return redirect(url_for('dashboard'))
 
     except Exception as e:
-        return f"오류: {e}"
+        return f"❌ 오류: {str(e)}", 500
 
 # ✅ 대시보드
 @app.route('/dashboard')
@@ -517,7 +534,6 @@ def dashboard():
         return html
 
     else:
-        # ✅ 일반 유저 - 이미지 스타일 메시지 보여주기
         welcome_msg = get_setting('welcome_message', DEFAULT_WELCOME_MESSAGE)
         welcome_msg = welcome_msg.replace('{username}', user.get('username', ''))
         welcome_msg = welcome_msg.replace('{user_id}', user.get('id', ''))
@@ -540,5 +556,5 @@ def logout():
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    init_db()
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    print("🚀 인증 시스템 시작 중...")
+    app.run(host='0.0.0.0', port=5000, debug=False)
