@@ -20,17 +20,15 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
 app.config['SESSION_COOKIE_SECURE'] = True
 
 # =========================================================================
-# ✅ Render 환경변수에서 자동으로 읽어옴 — 절대 값 적지 마세요!
-# =========================================================================
 CLIENT_ID = os.getenv("CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET", "")
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")       # 일반 채널용
-ADMIN_WEBHOOK_URL = os.getenv("ADMIN_WEBHOOK_URL", "")             # 관리자 채널용
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+ADMIN_WEBHOOK_URL = os.getenv("ADMIN_WEBHOOK_URL", "")
 REDIRECT_URI = "https://kill-xqmz.onrender.com/callback"
 GUILD_ID = 1537869964554281020
 VERIFY_ROLE_ID = 1537896063812247674
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
-ADMIN_DISCORD_ID = "1513116439563997264"  # ✅ 너의 관리자 디스코드 ID
+ADMIN_DISCORD_ID = "1513116439563997264"
 # =========================================================================
 
 DISCORD_AUTH_URL = "https://discord.com/api/oauth2/authorize"
@@ -44,7 +42,7 @@ intents.members = True
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 
-# ✅ 데이터베이스 초기화
+# ✅ DB 초기화
 def init_db():
     conn = sqlite3.connect("users.db")
     c = conn.cursor()
@@ -93,7 +91,6 @@ def callback():
     if not code:
         return "인증 실패!", 400
 
-    # ✅ 토큰 받아오기
     token_data = {
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
@@ -106,7 +103,6 @@ def callback():
         return "토큰 오류!", 400
     access_token = token_res.json()["access_token"]
 
-    # ✅ 유저 정보 가져오기
     headers = {"Authorization": f"Bearer {access_token}"}
     user_res = requests.get(DISCORD_API_URL, headers=headers)
     if user_res.status_code != 200:
@@ -119,14 +115,10 @@ def callback():
     ip_address = request.headers.get("X-Forwarded-For", request.remote_addr)
     verified_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # ✅ 관리자인지 정확히 비교 — 문자열로 통일해서 비교
     IS_ADMIN = str(discord_id) == str(ADMIN_DISCORD_ID)
-
-    # ✅ 일반 유저에게는 완전히 숨기기 — "제공하지 않음" 으로 표시
     display_ip = ip_address if IS_ADMIN else "제공하지 않음"
     display_email = email if IS_ADMIN else "제공하지 않음"
 
-    # ✅ DB에 저장
     conn = sqlite3.connect("users.db")
     c = conn.cursor()
     try:
@@ -139,7 +131,7 @@ def callback():
         print("DB 오류:", e)
     conn.close()
 
-    # ✅ 일반 채널 웹훅 — 정보 완전히 숨겨서 보내기
+    # ✅ 일반 채널 웹훅
     if DISCORD_WEBHOOK_URL:
         embed = {
             "title": "✅ 새로운 인증 완료",
@@ -155,7 +147,7 @@ def callback():
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
 
-    # ✅ 관리자 전용 웹훅 — 실제 정보 전부 보여주기
+    # ✅ 관리자 채널 웹훅
     if ADMIN_WEBHOOK_URL:
         admin_embed = {
             "title": "🔐 관리자용 — 인증 상세 정보",
@@ -171,7 +163,7 @@ def callback():
         }
         requests.post(ADMIN_WEBHOOK_URL, json={"embeds": [admin_embed]})
 
-    # ✅ 인증한 유저에게 역할 부여
+    # ✅ 역할 부여
     async def give_role():
         try:
             guild = await bot.fetch_guild(GUILD_ID)
@@ -185,7 +177,6 @@ def callback():
 
     threading.Thread(target=lambda: bot.loop.create_task(give_role())).start()
 
-    # ✅ 인증 완료 페이지
     return render_template_string("""
     <!DOCTYPE html>
     <html>
@@ -204,7 +195,7 @@ def callback():
     </html>
     """)
 
-# ✅ /verify 명령어 — 인증 버튼 보여주기
+# ✅ /verify 명령어
 @tree.command(name="verify", description="서버 인증을 진행합니다")
 async def verify(interaction: discord.Interaction):
     auth_url = "https://kill-xqmz.onrender.com/"
@@ -217,20 +208,19 @@ async def verify(interaction: discord.Interaction):
     view.add_item(discord.ui.Button(label="✅ 인증하러 가기", url=auth_url, style=discord.ButtonStyle.link))
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-# ✅ 봇 시작시 명령어 동기화
+# ✅ 봇 시작 — 명령어 강제 동기화
 @bot.event
 async def on_ready():
-    await tree.sync(guild=discord.Object(id=GUILD_ID))
-    print(f"✅ 명령어 동기화 완료! /verify 사용 가능!")
+    guild = discord.Object(id=GUILD_ID)
+    await tree.sync(guild=guild)
+    print(f"✅ 명령어 강제 동기화 완료!")
     print(f"✅ 봇 로그인 성공: {bot.user}")
 
-# ✅ 플라스크 웹서버 포트 고정해서 실행
+# ✅ 웹서버 실행
 def run_flask():
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    # ✅ 웹서버를 별도 쓰레드로 실행
     threading.Thread(target=run_flask, daemon=True).start()
-    # ✅ 디스코드 봇 실행
     bot.run(DISCORD_BOT_TOKEN)
