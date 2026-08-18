@@ -1,10 +1,9 @@
 import os
-import re
 import sqlite3
 import requests
 import threading
 import asyncio
-from flask import Flask, redirect, url_for, session, request, render_template_string
+from flask import Flask, request, render_template_string
 from datetime import datetime, timedelta
 import discord
 from discord import app_commands
@@ -17,15 +16,16 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
 app.config['SESSION_COOKIE_SECURE'] = True
 
+# ✅ 환경변수에서 전부 가져오기! 하드코딩 NO!
 CLIENT_ID = os.getenv("CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET", "")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 ADMIN_WEBHOOK_URL = os.getenv("ADMIN_WEBHOOK_URL", "")
-REDIRECT_URI = "https://kill-xqmz.onrender.com/callback"
-GUILD_ID = 1537869964554281020
-VERIFY_ROLE_ID = 1537896063812247674
+REDIRECT_URI = os.getenv("REDIRECT_URI", "https://kill-xqmz.onrender.com/callback")
+GUILD_ID = int(os.getenv("GUILD_ID", "0"))  # ✅ Render 환경변수에서 가져옴!
+VERIFY_ROLE_ID = int(os.getenv("VERIFY_ROLE_ID", "0"))
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
-ADMIN_DISCORD_ID = "1513116439563997264"
+ADMIN_DISCORD_ID = os.getenv("ADMIN_DISCORD_ID", "")
 
 DISCORD_AUTH_URL = "https://discord.com/api/oauth2/authorize"
 DISCORD_TOKEN_URL = "https://discord.com/api/oauth2/token"
@@ -35,8 +35,41 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-bot = discord.Client(intents=intents)
-tree = app_commands.CommandTree(bot)
+class MyBot(discord.Client):
+    def __init__(self):
+        super().__init__(intents=intents)
+        self.tree = app_commands.CommandTree(self)
+
+    async def setup_hook(self):
+        # ✅ setup_hook에서 명령어 등록! on_ready보다 먼저 실행됨!
+        print("\n" + "="*60)
+        print("🚀 setup_hook 실행 중...")
+        print(f"GUILD_ID: {GUILD_ID}")
+        
+        if GUILD_ID != 0:
+            guild = discord.Object(id=GUILD_ID)
+            try:
+                await self.tree.sync(guild=guild)
+                print(f"✅ ✅ ✅ /verify 명령어 서버에 등록 완료!")
+            except Exception as e:
+                print(f"❌ 서버 명령어 등록 오류: {e}")
+                # ✅ 실패하면 글로벌로라도 등록!
+                try:
+                    await self.tree.sync()
+                    print("✅ ✅ ✅ /verify 명령어 글로벌로 등록 완료! (전파에 최대 1시간 걸림)")
+                except Exception as e2:
+                    print(f"❌ 글로벌 명령어 등록 오류: {e2}")
+        else:
+            print("⚠️ GUILD_ID가 설정되지 않음! 글로벌 명령어로 등록!")
+            try:
+                await self.tree.sync()
+                print("✅ ✅ ✅ /verify 명령어 글로벌로 등록 완료!")
+            except Exception as e:
+                print(f"❌ 글로벌 명령어 등록 오류: {e}")
+        
+        print("="*60 + "\n")
+
+bot = MyBot()
 
 def init_db():
     conn = sqlite3.connect("users.db")
@@ -185,8 +218,10 @@ def callback():
     </html>
     """)
 
-@tree.command(name="verify", description="서버 인증을 진행합니다")
+# ✅ 명령어 정의
+@bot.tree.command(name="verify", description="서버 인증을 진행합니다")
 async def verify(interaction: discord.Interaction):
+    print(f"✅ /verify 명령어 호출됨! 사용자: {interaction.user}")
     auth_url = "https://kill-xqmz.onrender.com/"
     embed = discord.Embed(
         title="🔒 서버 인증",
@@ -197,26 +232,14 @@ async def verify(interaction: discord.Interaction):
     view.add_item(discord.ui.Button(label="✅ 인증하러 가기", url=auth_url, style=discord.ButtonStyle.link))
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-# ✅ on_ready를 제일 먼저 실행 — 절대 빼먹지 않게 강제함!
 @bot.event
 async def on_ready():
-    print("\n" + "="*60)
-    print(f"✅ ✅ ✅ 봇 로그인 성공: {bot.user}")
-    print(f"✅ ✅ ✅ 명령어 등록 중...")
-    guild = discord.Object(id=GUILD_ID)
-    await tree.sync(guild=guild)
-    print(f"✅ ✅ ✅ /verify 명령어 등록 완료! 이제 사용 가능!")
-    print("="*60 + "\n")
+    print(f"\n✅ 봇 로그인 성공: {bot.user}\n")
 
 def run_flask():
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
 
-async def main():
-    async with bot:
-        await bot.start(DISCORD_BOT_TOKEN)
-
 if __name__ == "__main__":
-    # ✅ 웹서버를 가장 마지막에 실행 → 봇이 먼저 준비됨!
     threading.Thread(target=run_flask, daemon=True).start()
-    asyncio.run(main())
+    bot.run(DISCORD_BOT_TOKEN)
