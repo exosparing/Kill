@@ -171,13 +171,19 @@ def callback():
             guild = await bot.fetch_guild(GUILD_ID)
             member = await guild.fetch_member(int(discord_id))
             role = guild.get_role(VERIFY_ROLE_ID)
-            if role:
-                await member.add_roles(role)
-                print(f"✅ {username} 에게 역할 부여 완료!")
+            if not role:
+                print(f"❌ 역할 부여 실패: ROLE_ID={VERIFY_ROLE_ID}에 해당하는 역할을 서버에서 찾을 수 없음")
+                return
+            await member.add_roles(role)
+            print(f"✅ {username} 에게 역할 부여 완료!")
+        except discord.Forbidden as e:
+            print(f"❌ 역할 부여 권한 오류: 봇 역할이 '{VERIFY_ROLE_ID}' 역할보다 아래에 있거나 '역할 관리' 권한이 없음 ({e})")
         except Exception as e:
-            print(f"❌ 역할 부여 오류: {e}")
+            print(f"❌ 역할 부여 오류: {type(e).__name__}: {e}")
 
-    threading.Thread(target=lambda: bot.loop.create_task(give_role())).start()
+    # ✅ [수정] bot.loop.create_task()는 스레드 세이프하지 않아 Flask 스레드에서
+    #    호출 시 조용히 실패할 수 있음. run_coroutine_threadsafe로 안전하게 스케줄링.
+    asyncio.run_coroutine_threadsafe(give_role(), bot.loop)
 
     return render_template_string("""
     <!DOCTYPE html>
