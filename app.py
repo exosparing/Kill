@@ -217,23 +217,22 @@ async def on_ready():
     threading.Thread(target=run_flask, daemon=True).start()
     print("✅ Flask 쓰레드 시작 완료!")
     
-    # ✅ 글로벌 명령어 먼저 강제 등록!
-    print("✅ 8단계: 글로벌 명령어 등록 시도 중...")
+    # ✅ [수정] 글로벌 sync는 전파가 느리고 재배포 반복 시 레이트리밋에 걸려
+    #    아무 응답 없이 멈춘 것처럼 보일 수 있어, 길드 전용 등록으로 변경.
+    #    (길드 전용은 몇 초~1분 내로 즉시 반영됨)
+    print("✅ 8단계: 길드 명령어 등록 시도 중...")
     try:
-        await tree.sync()
-        print("✅ ✅ ✅ 9단계: /verify 글로벌 명령어 등록 완료!")
-        print("ℹ️ 글로벌 명령어는 디스코드 전체에 전파되는 데 최대 1시간 걸릴 수 있으나, 보통 5~10분 내에 보입니다!")
-    except Exception as e:
-        print(f"❌ 글로벌 명령어 등록 오류: {e}")
-        # ✅ 실패시 서버 특정 명령어로 시도
         if GUILD_ID != 0:
-            print(f"✅ 서버 명령어로 다시 시도 중... GUILD_ID={GUILD_ID}")
-            try:
-                guild = discord.Object(id=GUILD_ID)
-                await tree.sync(guild=guild)
-                print("✅ ✅ ✅ 9단계: /verify 서버 명령어 등록 완료!")
-            except Exception as e2:
-                print(f"❌ 서버 명령어 등록 오류: {e2}")
+            guild = discord.Object(id=GUILD_ID)
+            tree.copy_global_to(guild=guild)
+            await tree.sync(guild=guild)
+            print("✅ ✅ ✅ 9단계: /verify 길드 명령어 등록 완료! (즉시 반영)")
+        else:
+            # GUILD_ID가 없을 때만 글로벌로 폴백 (최대 1시간 전파)
+            await tree.sync()
+            print("✅ ✅ ✅ 9단계: /verify 글로벌 명령어 등록 완료! (전파까지 최대 1시간)")
+    except Exception as e:
+        print(f"❌ 명령어 등록 오류: {e}")
     
     print("="*60 + "\n")
 
