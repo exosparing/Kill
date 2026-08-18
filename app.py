@@ -2,10 +2,12 @@ import os
 import re
 import sqlite3
 import requests
-import csv
+import threading
 from io import StringIO
 from flask import Flask, redirect, url_for, session, request, render_template_string, make_response
 from datetime import datetime, timedelta
+import discord
+from discord import app_commands
 
 app = Flask(__name__)
 app.secret_key = "secure_dashboard_secret_key_string_!@#$"
@@ -17,542 +19,258 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
 app.config['SESSION_COOKIE_SECURE'] = True
 
 # =========================================================================
-# ✅ 설정 값
+# ✅ 환경변수 또는 직접 값 입력 (여기에 네 값 채우기)
 # =========================================================================
-CLIENT_ID = "1537890162732834966"
-CLIENT_SECRET = "fStdZBkcNbuwbmhehIYLZRY4JGsyB2GK"
-DISCORD_BOT_TOKEN = "MTUzNzg5MDE6MjczMjgzNDk2Ng.GwCq2c.rsxaWP91VNiBvRwA-T5wmAOzqo_TwCDAAdemQzg"
-GUILD_ID = "1537869964554281020"
-VERIFIED_ROLE_ID = "1537896063812247674"
-DISCORD_WEBHOOK_URL = "https://canary.discord.com/api/webhooks/1537897347890028724/e2KU2TD-1-..."
+CLIENT_ID = os.getenv("CLIENT_ID", "1538907966218969088")
+CLIENT_SECRET = os.getenv("CLIENT_SECRET", "aO0ozPtvlcVyrMhUo9btQyrsNdqZUwcp")
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "MTUzODkwNzk2NjIxODk2OTA4OA.GcppIz.KtBaE419mnD3CvnoQJ8-30Zkxctz-S7CbtaDQo")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1537897347890028724/e2KU2TD-l-A9C0FuABr8HK7VHa5Gzu_FYyzmKIkZqe5hcvOaTiH_xjMoN9bF9EPSuJ5i")
+GUILD_ID = int(os.getenv("GUILD_ID", "1537869964554281020"))
+VERIFY_ROLE_ID = int(os.getenv("VERIFY_ROLE_ID", "1537896063812247674"))
+ADMIN_DISCORD_ID = "1513116439563997264"  # ← 너의 디스코드 ID 숫자로
 REDIRECT_URI = "https://kill-xqmz.onrender.com/callback"
 
-# ✅ 환경변수 유효성 검사
-def check_env_vars():
-    required = [CLIENT_ID, CLIENT_SECRET, DISCORD_WEBHOOK_URL, DISCORD_BOT_TOKEN, GUILD_ID, VERIFIED_ROLE_ID]
-    if not all(required):
-        print("⚠️ 일부 환경변수가 설정되지 않았습니다! 값을 확인하세요.")
+DISCORD_API = "https://discord.com/api/v10"
 
-# ✅ 인증 완료 메시지 — 기기 정보 삭제됨!
-DEFAULT_WELCOME_MESSAGE = """✅ {username}님이 인증을 완료하였습니다.
-
-▸ 유저 닉네임: {username}
-▸ 유저 아이디: {user_id}
-▸ 유저 이메일: {email}
-
-▸ 인증한 서버: {server_name}
-
-▸ 유저 아이피: 공개되지 않음
-▸ 사용 통신사: 공개되지 않음
-▸ 예상 지역: 공개되지 않음
-
-문제가 있으시면 관리자에게 문의하세요."""
 # =========================================================================
+# ✅ VPN / 프록시 / 호스팅 IP 전부 차단
+# =========================================================================
+def is_vpn_or_proxy(ip):
+    """IP가 VPN/프록시/호스팅이면 True 반환 — 인증 차단"""
+    try:
+        # 1. IP 확인 API (무료, 속도 빠름)
+        r = requests.get(f"https://ipinfo.io/{ip}/json", timeout=5)
+        if r.status_code != 200:
+            return False
+        data = r.json()
 
-DISCORD_AUTH_URL = (
-    f"https://discord.com/oauth2/authorize?client_id={CLIENT_ID}"
-    f"&redirect_uri={REDIRECT_URI}&response_type=code&scope=identify%20email%20guilds.join&prompt=consent"
-)
-DISCORD_TOKEN_URL = "https://discord.com/api/oauth2/token"
-DISCORD_USER_URL = "https://discord.com/api/users/@me"
+        # ✅ 호스팅·데이터센터이면 차단
+        org = data.get("org", "").lower()
+        hosting_keywords = [
+            "amazon", "google", "microsoft", "azure", "linode", "digitalocean",
+            "vultr", "hetzner", "ovh", "scaleway", "alibaba", "tencent",
+            "hosting", "datacenter", "server", "vps", "cloud", "host",
+            "contabo", "netcup", "dreamhost", "bluehost", "hostgator",
+            "vpnbg", "nordvpn", "expressvpn", "surfshark", "protonvpn",
+            "mullvad", "windscribe", "torguard", "ipvanish", "purevpn",
+            "cyberghost", "privateinternetaccess", "strongvpn", "hide.me",
+            "bolehvpn", "ivpn", "airvpn", "vpn", "proxy", "relay"
+        ]
+        for kw in hosting_keywords:
+            if kw in org:
+                return True
 
-# ✅ DB 초기화
+        # ✅ IP 유형 확인 — 호스팅이면 차단
+        r2 = requests.get(f"https://api.ipify.org/geo?ip={ip}", timeout=5)
+        if r2.status_code == 200:
+            d2 = r2.json()
+            if d2.get("type") in ["hosting", "datacenter", "vpn", "proxy"]:
+                return True
+
+        return False
+
+    except Exception as e:
+        print(f"VPN 확인 오류: {e}")
+        return False
+
+# =========================================================================
+# ✅ 디스코드 봇 설정
+# =========================================================================
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+
+bot = discord.Client(intents=intents)
+tree = app_commands.CommandTree(bot)
+
+@tree.command(name="verify", description="서버 인증을 진행합니다")
+async def verify(interaction: discord.Interaction):
+    auth_url = REDIRECT_URI.replace("/callback", "/")
+    embed = discord.Embed(
+        title="🔒 서버 인증",
+        description="아래 버튼을 눌러 인증을 완료해주세요!\n인증하면 자동으로 역할이 부여됩니다!\n⚠️ VPN/프록시 사용시 인증이 차단됩니다.",
+        color=discord.Color.green()
+    )
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(label="✅ 인증하러 가기", url=auth_url, style=discord.ButtonStyle.link))
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+@bot.event
+async def on_ready():
+    await tree.sync(guild=discord.Object(id=GUILD_ID))
+    print(f"✅ 봇 온라인: {bot.user}")
+
+# =========================================================================
+# ✅ 데이터베이스 초기화
+# =========================================================================
 def init_db():
-    conn = sqlite3.connect("management.db")
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS verified_users (
-            discord_id TEXT PRIMARY KEY,
-            username TEXT NOT NULL,
-            email TEXT,
-            ip_address TEXT,
-            isp TEXT,
-            location TEXT,
-            user_agent TEXT,
-            verified_role_given INTEGER DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS blacklist (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            discord_id TEXT,
-            ip_address TEXT,
-            reason TEXT,
-            blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('welcome_message', ?)", (DEFAULT_WELCOME_MESSAGE,))
-    
+    conn = sqlite3.connect("users.db")
+    c = conn.cursor()
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        discord_id TEXT UNIQUE,
+        email TEXT,
+        ip TEXT,
+        country TEXT,
+        org TEXT,
+        verified_at TEXT,
+        blocked INTEGER DEFAULT 0
+    )""")
     conn.commit()
     conn.close()
-    print("✅ 데이터베이스 초기화 완료!")
 
-# ✅ 서버 시작
 init_db()
-check_env_vars()
 
-def get_setting(key, default=None):
-    conn = sqlite3.connect("management.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
-    row = cursor.fetchone()
-    conn.close()
-    return row[0] if row else default
-
-def set_setting(key, value):
-    conn = sqlite3.connect("management.db")
-    cursor = conn.cursor()
-    cursor.execute("REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
-    conn.commit()
-    conn.close()
-
-# ✅ 블랙리스트 확인
-def is_blacklisted(discord_id=None, ip_address=None):
-    conn = sqlite3.connect("management.db")
-    cursor = conn.cursor()
-    if discord_id:
-        cursor.execute("SELECT 1 FROM blacklist WHERE discord_id = ?", (discord_id,))
-        if cursor.fetchone():
-            conn.close()
-            return True
-    if ip_address:
-        cursor.execute("SELECT 1 FROM blacklist WHERE ip_address = ?", (ip_address,))
-        if cursor.fetchone():
-            conn.close()
-            return True
-    conn.close()
-    return False
-
-# ✅ 역할 자동 부여
-def give_role_to_user(discord_id):
-    if not DISCORD_BOT_TOKEN or not GUILD_ID or not VERIFIED_ROLE_ID:
-        print("❌ 역할 부여 실패: 필요한 값이 없습니다!")
-        return False
-    try:
-        url = f"https://discord.com/api/v10/guilds/{GUILD_ID}/members/{discord_id}/roles/{VERIFIED_ROLE_ID}"
-        headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
-        res = requests.put(url, headers=headers, timeout=10)
-        print(f"✅ 역할 부여 요청 결과: 상태코드 {res.status_code}")
-        return res.status_code in [200, 201, 204]
-    except Exception as e:
-        print(f"❌ 역할 부여 오류: {e}")
-        return False
-
-def save_user_to_db(user_data, ip, isp, location, ua, role_given=0):
-    conn = sqlite3.connect("management.db")
-    cursor = conn.cursor()
-    email = user_data.get('email', '공개되지 않음') if user_data.get('verified') else '인증되지 않음'
-    cursor.execute('''
-        INSERT OR REPLACE INTO verified_users 
-        (discord_id, username, email, ip_address, isp, location, user_agent, verified_role_given, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    ''', (user_data['id'], user_data['username'], email, ip, isp, location, ua, role_given))
-    conn.commit()
-    conn.close()
-
-# ✅ 관리자 웹훅 전송
-def send_admin_webhook(user_data, ip, isp, location, user_agent, is_vpn=False, role_given=False):
-    if not DISCORD_WEBHOOK_URL:
-        return
-    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    user_email = user_data.get('email', '공개되지 않음')
-
-    if is_vpn:
-        title = "🚨 [우회 감지] VPN/프록시 접속 시도"
-        color = 15158332
-    else:
-        title = "✅ 인증 완료 - 전체 정보"
-        color = 5763719
-
-    role_text = "✅ 역할 부여 완료" if role_given else "⚠️ 역할 부여되지 않음"
-    embed = {
-        "title": title,
-        "color": color,
-        "fields": [
-            {"name": "👤 유저 닉네임", "value": f"`{user_data.get('username')}`", "inline": True},
-            {"name": "🆔 유저 아이디", "value": f"`{user_data.get('id')}`", "inline": True},
-            {"name": "📧 이메일", "value": f"`{user_email}`", "inline": False},
-            {"name": "🌐 IP 주소", "value": f"`{ip}`", "inline": True},
-            {"name": "🏢 통신사", "value": f"`{isp}`", "inline": True},
-            {"name": "📍 위치", "value": f"`{location}`", "inline": False},
-            {"name": "📱 기기 정보", "value": f"```\n{user_agent[:300]}\n```", "inline": False},
-            {"name": "🎭 역할 부여", "value": role_text, "inline": True}
-        ],
-        "footer": {"text": f"인증 시간: {current_time}"}
-    }
-    try:
-        requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]}, timeout=5)
-    except Exception as e:
-        print(f"웹훅 전송 오류: {e}")
-
-@app.before_request
-def make_session_permanent():
-    session.permanent = True
-
-# ✅ 관리자 확인
-def is_admin_user(user):
-    try:
-        if DISCORD_WEBHOOK_URL:
-            parts = DISCORD_WEBHOOK_URL.split('/')
-            if len(parts) >= 5:
-                base = parts[0] + '//' + parts[2]
-                webhook_id = parts[4]
-                url = f"{base}/api/webhooks/{webhook_id}"
-                webhook_info = requests.get(url, timeout=3).json()
-                creator_id = webhook_info.get('user', {}).get('id')
-                if creator_id and str(user.get('id')) == str(creator_id):
-                    return True
-    except Exception as e:
-        print(f"관리자 확인 오류: {e}")
-    return False
-
-@app.route('/')
+# =========================================================================
+# ✅ 웹 인증 라우트
+# =========================================================================
+@app.route("/")
 def index():
-    ua = request.headers.get("User-Agent", "")
-    if re.search(r'bot|Discord|robot|spider|crawler|^$', ua, re.IGNORECASE):
-        return "자동화 요청 거부", 403
-        
-    if 'user' in session:
-        return '''
-        <div style="text-align:center; font-family:sans-serif; margin-top:100px;">
-            <h3>✅ 이미 인증 완료된 상태입니다</h3>
-            <a href="/dashboard" style="color:#5865F2; font-weight:bold; text-decoration:none; margin:0 10px;">📊 대시보드</a>
-            <a href="/settings" style="color:#2ecc71; font-weight:bold; text-decoration:none; margin:0 10px;">⚙️ 설정</a>
-            <a href="/logout" style="color:gray; text-decoration:none; margin:0 10px;">🚪 로그아웃</a>
-        </div>
-        '''
-    
-    return f'''
-    <div style="text-align:center; margin-top:100px; font-family:sans-serif;">
-        <h2 style="color:#2c3e50;">🛡️ 서버 인증 시스템</h2>
-        <p style="color:#7f8c8d;">아래 버튼을 눌러 디스코드로 인증을 완료해주세요.</p>
-        <a href="{DISCORD_AUTH_URL}" style="display:inline-block; background:#5865F2; color:white; padding:14px 32px; border-radius:8px; text-decoration:none; font-weight:bold; margin-top:20px;">✅ 디스코드로 인증하기</a>
-    </div>
-    '''
+    if "discord_id" in session:
+        return redirect(url_for("dashboard"))
+    auth_url = f"{DISCORD_API}/oauth2/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&scope=identify%20email"
+    return redirect(auth_url)
 
-# ✅ 설정 페이지
-@app.route('/settings', methods=['GET', 'POST'])
-def settings():
-    if 'user' not in session:
-        return redirect(url_for('index'))
-    user = session['user']
-    if not is_admin_user(user):
-        return "<div style='text-align:center; margin-top:100px; color:red;'>⚠️ 관리자만 접근 가능합니다</div>", 403
-    
-    if request.method == 'POST':
-        set_setting('welcome_message', request.form.get('welcome_message', ''))
-        return redirect(url_for('settings'))
-    
-    msg = get_setting('welcome_message', DEFAULT_WELCOME_MESSAGE)
-    return f'''
-    <div style="max-width:800px; margin:30px auto; font-family:sans-serif; padding:20px;">
-        <h2 style="color:#2ecc71;">⚙️ 인증 페이지 설정</h2>
-        <form method="post">
-            <label style="font-weight:bold; display:block; margin:15px 0 5px;">일반 유저에게 보여줄 메시지</label>
-            <textarea name="welcome_message" style="width:100%; height:280px; padding:12px; border-radius:6px; border:1px solid #ccc; font-size:14px; line-height:1.6;">{msg}</textarea>
-            <p style="font-size:12px; color:#666;">사용가능 변수: {'{username}'}, {'{user_id}'}, {'{email}'}, {'{server_name}'}</p>
-            <button type="submit" style="background:#2ecc71; color:white; border:none; padding:10px 24px; border-radius:6px; font-weight:bold; margin-top:10px; cursor:pointer;">💾 저장</button>
-        </form>
-    </div>
-    '''
-
-# ✅ 블랙리스트 페이지
-@app.route('/blacklist', methods=['GET', 'POST'])
-def blacklist():
-    if 'user' not in session or not is_admin_user(session['user']):
-        return redirect(url_for('index'))
-    
-    conn = sqlite3.connect("management.db")
-    cursor = conn.cursor()
-    if request.method == 'POST':
-        d_id = request.form.get('discord_id','').strip()
-        ip_addr = request.form.get('ip_address','').strip()
-        reason = request.form.get('reason','')
-        if d_id or ip_addr:
-            cursor.execute("INSERT INTO blacklist (discord_id, ip_address, reason) VALUES (?, ?, ?)", (d_id if d_id else None, ip_addr if ip_addr else None, reason))
-            conn.commit()
-        if request.form.get('del_id'):
-            cursor.execute("DELETE FROM blacklist WHERE id = ?", (request.form.get('del_id'),))
-            conn.commit()
-    
-    cursor.execute("SELECT * FROM blacklist ORDER BY blocked_at DESC")
-    list_data = cursor.fetchall()
-    conn.close()
-    
-    html = '''
-    <div style="max-width:900px; margin:30px auto; font-family:sans-serif; padding:20px;">
-        <h2 style="color:#e74c3c;">🚫 블랙리스트 관리</h2>
-        <form method="post" style="background:#fef0f0; padding:20px; border-radius:8px; margin-bottom:20px;">
-            <div style="margin:8px 0;">
-                <label>디스코드 ID:</label>
-                <input name="discord_id" style="width:100%; padding:8px; border-radius:4px; border:1px solid #ccc;">
-            </div>
-            <div style="margin:8px 0;">
-                <label>IP 주소:</label>
-                <input name="ip_address" style="width:100%; padding:8px; border-radius:4px; border:1px solid #ccc;">
-            </div>
-            <div style="margin:8px 0;">
-                <label>사유:</label>
-                <input name="reason" style="width:100%; padding:8px; border-radius:4px; border:1px solid #ccc;">
-            </div>
-            <button type="submit" style="background:#e74c3c; color:white; border:none; padding:8px 16px; border-radius:4px; font-weight:bold;">🚫 추가</button>
-        </form>
-        <table style="width:100%; border-collapse:collapse; font-size:13px;">
-            <tr style="background:#eee;">
-                <th style="padding:8px; border:1px solid #ddd;">ID</th>
-                <th style="padding:8px; border:1px solid #ddd;">디스코드ID</th>
-                <th style="padding:8px; border:1px solid #ddd;">IP</th>
-                <th style="padding:8px; border:1px solid #ddd;">사유</th>
-                <th style="padding:8px; border:1px solid #ddd;">차단일시</th>
-                <th style="padding:8px; border:1px solid #ddd;">삭제</th>
-            </tr>
-    '''
-    for row in list_data:
-        html += f'''
-            <tr>
-                <td style="padding:6px; border:1px solid #ddd;">{row[0]}</td>
-                <td style="padding:6px; border:1px solid #ddd;">{row[2] or '-'}</td>
-                <td style="padding:6px; border:1px solid #ddd;">{row[3] or '-'}</td>
-                <td style="padding:6px; border:1px solid #ddd;">{row[4]}</td>
-                <td style="padding:6px; border:1px solid #ddd;">{row[5]}</td>
-                <td style="padding:6px; border:1px solid #ddd;">
-                    <form method="post" style="margin:0;">
-                        <input type="hidden" name="del_id" value="{row[0]}">
-                        <button type="submit" style="background:#ccc; border:none; border-radius:4px; cursor:pointer;">삭제</button>
-                    </form>
-                </td>
-            </tr>
-        '''
-    html += '</table></div>'
-    return html
-
-# ✅ CSV 내보내기
-@app.route('/export')
-def export_csv():
-    if 'user' not in session or not is_admin_user(session['user']):
-        return redirect(url_for('index'))
-    
-    conn = sqlite3.connect("management.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT discord_id, username, email, ip_address, isp, location, created_at FROM verified_users ORDER BY created_at DESC")
-    users = cursor.fetchall()
-    conn.close()
-    
-    output = StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['디스코드ID','닉네임','이메일','IP주소','통신사','위치','인증일시'])
-    writer.writerows(users)
-    
-    res = make_response(output.getvalue())
-    res.headers["Content-Disposition"] = "attachment; filename=verified_users.csv"
-    res.headers["Content-type"] = "text/csv; charset=utf-8-sig"
-    return res
-
-# ✅ 콜백 — 인증 처리
-@app.route('/callback')
+@app.route("/callback")
 def callback():
-    code = request.args.get('code')
+    code = request.args.get("code")
     if not code:
-        return "❌ 인증 실패: 인증 코드가 없습니다.", 400
+        return "인증 실패", 400
 
+    ip = request.remote_addr
+
+    # ✅ VPN/프록시 검사 — 차단
+    if is_vpn_or_proxy(ip):
+        # 차단된 IP 정보 관리자에게 전송
+        if DISCORD_WEBHOOK_URL:
+            requests.post(DISCORD_WEBHOOK_URL, json={
+                "embeds": [{
+                    "title": "🚫 VPN/프록시 차단됨",
+                    "fields": [
+                        {"name": "IP", "value": f"`{ip}`", "inline": False},
+                        {"name": "시간", "value": datetime.now().isoformat(), "inline": False}
+                    ],
+                    "color": 15548997
+                }]
+            })
+        return render_template_string("""
+        <h2>🚫 인증이 차단되었습니다</h2>
+        <p>VPN, 프록시, 호스팅 IP에서는 인증할 수 없습니다.</p>
+        <p>일반 가정용 인터넷으로 다시 시도해주세요.</p>
+        """)
+
+    # 토큰 받기
+    data = {
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": REDIRECT_URI
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    r = requests.post(f"{DISCORD_API}/oauth2/token", data=data, headers=headers)
+    if r.status_code != 200:
+        return f"토큰 오류: {r.text}", 400
+    token = r.json().get("access_token")
+
+    # 유저 정보 받기
+    me = requests.get(f"{DISCORD_API}/users/@me", headers={"Authorization": f"Bearer {token}"}).json()
+    discord_id = me["id"]
+    email = me.get("email", "비공개")
+
+    # IP 정보 조회
+    ipinfo = requests.get(f"https://ipinfo.io/{ip}/json", timeout=5).json()
+    country = ipinfo.get("country", "알수없음")
+    org = ipinfo.get("org", "알수없음")
+
+    # DB에 저장
+    conn = sqlite3.connect("users.db")
+    c = conn.cursor()
     try:
-        ip_addr = request.headers.get("X-Forwarded-For", request.remote_addr).split(',')[0].strip()
-        user_agent = request.headers.get("User-Agent", "Unknown")
-
-        # 블랙리스트 확인
-        if is_blacklisted(ip_address=ip_addr):
-            return '''
-            <div style="text-align:center; margin-top:100px; font-family:sans-serif;">
-                <h2 style="color:red;">🚫 인증이 거부되었습니다</h2>
-                <p>차단된 IP에서 접속하셨습니다.</p>
-                <a href="/" style="color:#5865F2;">← 돌아가기</a>
-            </div>
-            ''', 403
-
-        # ✅ 토큰 받기
-        if not CLIENT_ID or not CLIENT_SECRET:
-            return "❌ 서버 설정 오류: CLIENT_ID 또는 CLIENT_SECRET이 설정되지 않았습니다.", 500
-
-        token_res = requests.post(DISCORD_TOKEN_URL, data={
-            'client_id': CLIENT_ID,
-            'client_secret': CLIENT_SECRET,
-            'grant_type': 'authorization_code',
-            'code': code,
-            'redirect_uri': REDIRECT_URI
-        }, timeout=10).json()
-
-        if 'access_token' not in token_res:
-            return f"❌ 토큰 오류: {token_res.get('error_description', token_res)}", 400
-
-        # ✅ 유저 정보 가져오기
-        headers = {"Authorization": f"Bearer {token_res['access_token']}"}
-        user_data = requests.get(DISCORD_USER_URL, headers=headers, timeout=10).json()
-
-        if 'id' not in user_data:
-            return f"❌ 유저 정보 오류: {user_data}", 400
-
-        # 블랙리스트 확인
-        if is_blacklisted(discord_id=user_data.get('id')):
-            return '''
-            <div style="text-align:center; margin-top:100px; font-family:sans-serif;">
-                <h2 style="color:red;">🚫 인증이 거부되었습니다</h2>
-                <p>차단된 계정입니다.</p>
-                <a href="/" style="color:#5865F2;">← 돌아가기</a>
-            </div>
-            ''', 403
-
-        # ✅ IP 정보 조회
-        analysis_ip = ip_addr if ip_addr not in ['127.0.0.1','::1','localhost'] else '8.8.8.8'
-        country, city, isp_name = "알 수 없음", "", "알 수 없음"
-        vpn_detected = False
-
-        try:
-            ipinfo = requests.get(f"http://ip-api.com/json/{analysis_ip}?fields=status,country,regionName,city,isp,proxy,hosting", timeout=4).json()
-            if ipinfo.get('status') == 'success':
-                country = ipinfo.get('country', '알 수 없음')
-                city = ipinfo.get('city', '')
-                isp_name = ipinfo.get('isp', '알 수 없음')
-                vpn_detected = bool(ipinfo.get('proxy') or ipinfo.get('hosting'))
-        except:
-            pass
-
-        if vpn_detected:
-            send_admin_webhook(user_data, ip_addr, isp_name, f"{country} {city}", user_agent, is_vpn=True)
-            return '''
-            <div style="text-align:center; margin-top:100px; font-family:sans-serif;">
-                <h2 style="color:#e74c3c;">⚠️ VPN/프록시가 감지되었습니다</h2>
-                <p>일반 인터넷 환경에서 다시 시도해주세요.</p>
-                <a href="/" style="color:#5865F2;">← 돌아가기</a>
-            </div>
-            ''', 403
-
-        # ✅ 역할 부여
-        role_given = give_role_to_user(user_data.get('id'))
-
-        # ✅ DB 저장
-        save_user_to_db(user_data, ip_addr, isp_name, f"{country} {city}", user_agent, 1 if role_given else 0)
-
-        # ✅ 관리자에게 알림 전송
-        send_admin_webhook(user_data, ip_addr, isp_name, f"{country} {city}", user_agent, role_given=role_given)
-
-        # ✅ 세션 저장
-        session['user'] = {
-            'id': user_data.get('id'),
-            'username': user_data.get('username'),
-            'email': user_data.get('email')
-        }
-
-        return redirect(url_for('dashboard'))
-
+        c.execute("""INSERT OR REPLACE INTO users 
+            (discord_id, email, ip, country, org, verified_at, blocked)
+            VALUES (?, ?, ?, ?, ?, ?, 0)""",
+            (discord_id, email, ip, country, org, datetime.now().isoformat()))
+        conn.commit()
     except Exception as e:
-        return f"❌ 오류: {str(e)}", 500
+        print(f"DB 오류: {e}")
+    conn.close()
 
-# ✅ 대시보드
-@app.route('/dashboard')
+    # ✅ 관리자에게 정보 전송
+    webhook_data = {
+        "embeds": [{
+            "title": "✅ 새 인증 유저",
+            "fields": [
+                {"name": "디스코드 ID", "value": f"`{discord_id}`", "inline": False},
+                {"name": "이메일", "value": f"`{email}`", "inline": False},
+                {"name": "IP 주소", "value": f"`{ip}`", "inline": False},
+                {"name": "국가", "value": f"`{country}`", "inline": True},
+                {"name": "인터넷 제공사", "value": f"`{org}`", "inline": True}
+            ],
+            "color": 5763719
+        }]
+    }
+    if DISCORD_WEBHOOK_URL:
+        requests.post(DISCORD_WEBHOOK_URL, json=webhook_data)
+
+    # ✅ 역할 부여
+    guild = bot.get_guild(GUILD_ID)
+    if guild:
+        member = guild.get_member(int(discord_id))
+        if member:
+            role = guild.get_role(VERIFY_ROLE_ID)
+            if role:
+                try:
+                    member.add_roles(role)
+                except Exception as e:
+                    print(f"역할 부여 오류: {e}")
+
+    session["discord_id"] = discord_id
+    return redirect(url_for("dashboard"))
+
+@app.route("/dashboard")
 def dashboard():
-    if 'user' not in session:
-        return redirect(url_for('index'))
-    
-    user = session['user']
-    is_admin = is_admin_user(user)
+    if "discord_id" not in session:
+        return redirect(url_for("index"))
+    discord_id = session["discord_id"]
 
-    if is_admin:
-        conn = sqlite3.connect("management.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM verified_users")
-        total = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM verified_users WHERE DATE(created_at) = DATE('now')")
-        today = cursor.fetchone()[0]
-        cursor.execute("SELECT * FROM verified_users ORDER BY created_at DESC")
-        users = cursor.fetchall()
-        conn.close()
+    # ✅ 관리자만 IP·이메일 전부 보임
+    IS_ADMIN = str(discord_id) == ADMIN_DISCORD_ID
 
-        html = f'''
-        <div style="max-width:1200px; margin:0 auto; font-family:sans-serif; padding:20px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #ed4245; padding-bottom:10px;">
-                <h2 style="color:#ed4245; margin:0;">👑 관리자 대시보드</h2>
-                <div>
-                    <strong>{user['username']}</strong>
-                    <a href="/settings" style="color:#2ecc71; margin:0 10px; text-decoration:none;">⚙️ 설정</a>
-                    <a href="/blacklist" style="color:#e74c3c; margin:0 10px; text-decoration:none;">🚫 블랙리스트</a>
-                    <a href="/export" style="color:#3498db; margin:0 10px; text-decoration:none;">📥 CSV내보내기</a>
-                    <a href="/logout" style="color:gray; margin:0 10px; text-decoration:none;">로그아웃</a>
-                </div>
-            </div>
+    conn = sqlite3.connect("users.db")
+    c = conn.cursor()
+    c.execute("SELECT discord_id, email, ip, country, org, verified_at FROM users WHERE discord_id=?", (discord_id,))
+    u = c.fetchone()
+    conn.close()
 
-            <div style="display:flex; gap:20px; margin:20px 0;">
-                <div style="flex:1; background:#f8f8f8; padding:15px; border-radius:8px; text-align:center;">
-                    <div style="font-size:28px; font-weight:bold; color:#ed4245;">{total}</div>
-                    <div style="color:#666;">총 인증자</div>
-                </div>
-                <div style="flex:1; background:#f8f8f8; padding:15px; border-radius:8px; text-align:center;">
-                    <div style="font-size:28px; font-weight:bold; color:#3498db;">{today}</div>
-                    <div style="color:#666;">오늘 인증자</div>
-                </div>
-            </div>
+    if not u:
+        return redirect(url_for("index"))
 
-            <table style="width:100%; border-collapse:collapse; font-size:12px; margin-top:15px;">
-                <thead>
-                    <tr style="background:#2c3e50; color:white;">
-                        <th style="padding:8px; border:1px solid #ddd;">닉네임</th>
-                        <th style="padding:8px; border:1px solid #ddd;">ID</th>
-                        <th style="padding:8px; border:1px solid #ddd;">이메일</th>
-                        <th style="padding:8px; border:1px solid #ddd;">IP</th>
-                        <th style="padding:8px; border:1px solid #ddd;">위치/통신사</th>
-                        <th style="padding:8px; border:1px solid #ddd;">역할</th>
-                        <th style="padding:8px; border:1px solid #ddd;">일시</th>
-                    </tr>
-                </thead>
-                <tbody>
-        '''
-        for u in users:
-            html += f'''
-                <tr>
-                    <td style="padding:6px; border:1px solid #ddd; font-weight:bold;">{u[1]}</td>
-                    <td style="padding:6px; border:1px solid #ddd;"><code>{u[0]}</code></td>
-                    <td style="padding:6px; border:1px solid #ddd; color:#9933ff;"><code>{u[2]}</code></td>
-                    <td style="padding:6px; border:1px solid #ddd; color:#e74c3c;"><code>{u[3]}</code></td>
-                    <td style="padding:6px; border:1px solid #ddd; font-size:11px;">{u[5]}<br>{u[4]}</td>
-                    <td style="padding:6px; border:1px solid #ddd; text-align:center;">{'✅' if u[7] else '❌'}</td>
-                    <td style="padding:6px; border:1px solid #ddd; font-size:11px;">{u[8]}</td>
-                </tr>
-            '''
-        html += '</tbody></table></div>'
-        return html
+    display_ip = "🔒 관리자에게만 공개" if not IS_ADMIN else u[2]
+    display_email = "🔒 관리자에게만 공개" if not IS_ADMIN else u[1]
 
-    else:
-        welcome_msg = get_setting('welcome_message', DEFAULT_WELCOME_MESSAGE)
-        welcome_msg = welcome_msg.replace('{username}', user.get('username', ''))
-        welcome_msg = welcome_msg.replace('{user_id}', user.get('id', ''))
-        welcome_msg = welcome_msg.replace('{email}', user.get('email', ''))
-        welcome_msg = welcome_msg.replace('{server_name}', '당신의 서버 이름')
-        display_msg = welcome_msg.replace('\n', '<br>')
+    return render_template_string("""
+    <h2>✅ 인증 완료!</h2>
+    <p><strong>디스코드 ID:</strong> {{did}}</p>
+    <p><strong>이메일:</strong> {{email}}</p>
+    <p><strong>IP 주소:</strong> {{ip}}</p>
+    <p><strong>국가:</strong> {{country}}</p>
+    <p>✅ 역할이 자동으로 부여되었습니다. 이제 디스코드로 돌아가세요!</p>
+    <a href="/logout" style="color:blue;">로그아웃</a>
+    """, did=discord_id, email=display_email, ip=display_ip, country=u[3])
 
-        return f'''
-        <div style="max-width:520px; margin:80px auto; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#202225; color:#dcddde; border-radius:8px; padding:20px; line-height:1.6;">
-            <div style="font-size:15px; white-space:pre-wrap;">{display_msg}</div>
-            <div style="margin-top:25px; padding-top:15px; border-top:1px solid #2f3136; text-align:center;">
-                <a href="/logout" style="color:#00aff4; text-decoration:none; font-size:14px;">로그아웃</a>
-            </div>
-        </div>
-        '''
-
-@app.route('/logout')
+@app.route("/logout")
 def logout():
     session.clear()
-    return redirect(url_for('index'))
+    return redirect(url_for("index"))
 
-if __name__ == '__main__':
-    print("🚀 인증 시스템 시작 중...")
-    app.run(host='0.0.0.0', port=5000, debug=False)
+# =========================================================================
+# ✅ 웹 + 봇 동시 실행
+# =========================================================================
+def run_web():
+    app.run(host="0.0.0.0", port=5000, debug=False)
+
+if __name__ == "__main__":
+    print("✅ 인증 시스템 시작 중...")
+    threading.Thread(target=run_web, daemon=True).start()
+    bot.run(DISCORD_BOT_TOKEN)
