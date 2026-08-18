@@ -32,7 +32,7 @@ VERIFY_ROLE_ID = int(os.getenv("VERIFY_ROLE_ID", "0"))
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 ADMIN_DISCORD_ID = os.getenv("ADMIN_DISCORD_ID", "")
 
-print(f"✅ 3단계: 환경변수 로드 완료! GUILD_ID={GUILD_ID}")
+print(f"✅ 3단계: 환경변수 로드 완료! GUILD_ID={GUILD_ID}, VERIFY_ROLE_ID={VERIFY_ROLE_ID}")
 
 DISCORD_AUTH_URL = "https://discord.com/api/oauth2/authorize"
 DISCORD_TOKEN_URL = "https://discord.com/api/oauth2/token"
