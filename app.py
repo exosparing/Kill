@@ -2,11 +2,12 @@ import os
 import sqlite3
 import requests
 import threading
-import asyncio
 from flask import Flask, request, render_template_string
 from datetime import datetime, timedelta
 import discord
 from discord import app_commands
+
+print("✅ 1단계: import 완료!")
 
 app = Flask(__name__)
 app.secret_key = "secure_dashboard_secret_key_string_!@#$"
@@ -16,16 +17,19 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
 app.config['SESSION_COOKIE_SECURE'] = True
 
-# ✅ 환경변수에서 전부 가져오기! 하드코딩 NO!
+print("✅ 2단계: Flask 설정 완료!")
+
 CLIENT_ID = os.getenv("CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET", "")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 ADMIN_WEBHOOK_URL = os.getenv("ADMIN_WEBHOOK_URL", "")
 REDIRECT_URI = os.getenv("REDIRECT_URI", "https://kill-xqmz.onrender.com/callback")
-GUILD_ID = int(os.getenv("GUILD_ID", "0"))  # ✅ Render 환경변수에서 가져옴!
+GUILD_ID = int(os.getenv("GUILD_ID", "0"))
 VERIFY_ROLE_ID = int(os.getenv("VERIFY_ROLE_ID", "0"))
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 ADMIN_DISCORD_ID = os.getenv("ADMIN_DISCORD_ID", "")
+
+print(f"✅ 3단계: 환경변수 로드 완료! GUILD_ID={GUILD_ID}")
 
 DISCORD_AUTH_URL = "https://discord.com/api/oauth2/authorize"
 DISCORD_TOKEN_URL = "https://discord.com/api/oauth2/token"
@@ -35,41 +39,12 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-class MyBot(discord.Client):
-    def __init__(self):
-        super().__init__(intents=intents)
-        self.tree = app_commands.CommandTree(self)
+print(f"✅ 4단계: discord.py 버전: {discord.__version__}")
 
-    async def setup_hook(self):
-        # ✅ setup_hook에서 명령어 등록! on_ready보다 먼저 실행됨!
-        print("\n" + "="*60)
-        print("🚀 setup_hook 실행 중...")
-        print(f"GUILD_ID: {GUILD_ID}")
-        
-        if GUILD_ID != 0:
-            guild = discord.Object(id=GUILD_ID)
-            try:
-                await self.tree.sync(guild=guild)
-                print(f"✅ ✅ ✅ /verify 명령어 서버에 등록 완료!")
-            except Exception as e:
-                print(f"❌ 서버 명령어 등록 오류: {e}")
-                # ✅ 실패하면 글로벌로라도 등록!
-                try:
-                    await self.tree.sync()
-                    print("✅ ✅ ✅ /verify 명령어 글로벌로 등록 완료! (전파에 최대 1시간 걸림)")
-                except Exception as e2:
-                    print(f"❌ 글로벌 명령어 등록 오류: {e2}")
-        else:
-            print("⚠️ GUILD_ID가 설정되지 않음! 글로벌 명령어로 등록!")
-            try:
-                await self.tree.sync()
-                print("✅ ✅ ✅ /verify 명령어 글로벌로 등록 완료!")
-            except Exception as e:
-                print(f"❌ 글로벌 명령어 등록 오류: {e}")
-        
-        print("="*60 + "\n")
+bot = discord.Client(intents=intents)
+tree = app_commands.CommandTree(bot)
 
-bot = MyBot()
+print("✅ 5단계: 봇 객체 생성 완료!")
 
 def init_db():
     conn = sqlite3.connect("users.db")
@@ -87,6 +62,7 @@ def init_db():
     conn.close()
 
 init_db()
+print("✅ 6단계: DB 초기화 완료!")
 
 @app.route("/")
 def home():
@@ -218,8 +194,7 @@ def callback():
     </html>
     """)
 
-# ✅ 명령어 정의
-@bot.tree.command(name="verify", description="서버 인증을 진행합니다")
+@tree.command(name="verify", description="서버 인증을 진행합니다")
 async def verify(interaction: discord.Interaction):
     print(f"✅ /verify 명령어 호출됨! 사용자: {interaction.user}")
     auth_url = "https://kill-xqmz.onrender.com/"
@@ -234,12 +209,41 @@ async def verify(interaction: discord.Interaction):
 
 @bot.event
 async def on_ready():
-    print(f"\n✅ 봇 로그인 성공: {bot.user}\n")
+    print("\n" + "="*60)
+    print(f"✅ ✅ ✅ 7단계: on_ready 실행! 봇 로그인 성공: {bot.user}")
+    print(f"discord.py 버전: {discord.__version__}")
+    
+    # ✅ 먼저 서버 특정 명령어 시도
+    if GUILD_ID != 0:
+        print(f"✅ 8단계: 서버 명령어 등록 시도 중... GUILD_ID={GUILD_ID}")
+        try:
+            guild = discord.Object(id=GUILD_ID)
+            await tree.sync(guild=guild)
+            print("✅ ✅ ✅ 9단계: /verify 서버 명령어 등록 완료!")
+        except Exception as e:
+            print(f"❌ 서버 명령어 등록 오류: {e}")
+            print("✅ 글로벌 명령어로 다시 시도 중...")
+            try:
+                await tree.sync()
+                print("✅ ✅ ✅ 9단계: /verify 글로벌 명령어 등록 완료! (최대 1시간 걸릴 수 있음)")
+            except Exception as e2:
+                print(f"❌ 글로벌 명령어 등록 오류: {e2}")
+    else:
+        print("⚠️ GUILD_ID가 0임! 글로벌 명령어로 등록 시도...")
+        try:
+            await tree.sync()
+            print("✅ ✅ ✅ 9단계: /verify 글로벌 명령어 등록 완료!")
+        except Exception as e:
+            print(f"❌ 글로벌 명령어 등록 오류: {e}")
+    
+    print("="*60 + "\n")
 
 def run_flask():
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
+    print("✅ 0단계: 프로그램 시작!")
     threading.Thread(target=run_flask, daemon=True).start()
+    print("✅ Flask 쓰레드 시작 완료!")
     bot.run(DISCORD_BOT_TOKEN)
