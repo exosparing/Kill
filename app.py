@@ -3,6 +3,7 @@ import re
 import sqlite3
 import requests
 import threading
+import asyncio
 from flask import Flask, redirect, url_for, session, request, render_template_string
 from datetime import datetime, timedelta
 import discord
@@ -164,12 +165,7 @@ def callback():
         except Exception as e:
             print(f"❌ 역할 부여 오류: {e}")
 
-    if bot.is_ready():
-        bot.loop.create_task(give_role())
-    else:
-        @bot.event
-        async def on_ready_temp():
-            await give_role()
+    threading.Thread(target=lambda: bot.loop.create_task(give_role())).start()
 
     return render_template_string("""
     <!DOCTYPE html>
@@ -201,21 +197,26 @@ async def verify(interaction: discord.Interaction):
     view.add_item(discord.ui.Button(label="✅ 인증하러 가기", url=auth_url, style=discord.ButtonStyle.link))
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-# ✅ on_ready를 제일 위에 둬서 무조건 실행되게 함!
+# ✅ on_ready를 제일 먼저 실행 — 절대 빼먹지 않게 강제함!
 @bot.event
 async def on_ready():
-    print("="*50)
+    print("\n" + "="*60)
     print(f"✅ ✅ ✅ 봇 로그인 성공: {bot.user}")
+    print(f"✅ ✅ ✅ 명령어 등록 중...")
     guild = discord.Object(id=GUILD_ID)
     await tree.sync(guild=guild)
     print(f"✅ ✅ ✅ /verify 명령어 등록 완료! 이제 사용 가능!")
-    print("="*50)
+    print("="*60 + "\n")
 
 def run_flask():
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
 
+async def main():
+    async with bot:
+        await bot.start(DISCORD_BOT_TOKEN)
+
 if __name__ == "__main__":
-    # ✅ 봇을 먼저 실행! on_ready가 제일 먼저 실행됨!
+    # ✅ 웹서버를 가장 마지막에 실행 → 봇이 먼저 준비됨!
     threading.Thread(target=run_flask, daemon=True).start()
-    bot.run(DISCORD_BOT_TOKEN)
+    asyncio.run(main())
