@@ -224,5 +224,13 @@ async def on_ready():
     print(f"✅ 명령어 동기화 완료! /verify 사용 가능!")
     print(f"✅ 봇 로그인 성공: {bot.user}")
 
+# ✅ 플라스크 웹서버 포트 고정해서 실행
+def run_flask():
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+
 if __name__ == "__main__":
+    # ✅ 웹서버를 별도 쓰레드로 실행
+    threading.Thread(target=run_flask, daemon=True).start()
+    # ✅ 디스코드 봇 실행
     bot.run(DISCORD_BOT_TOKEN)
