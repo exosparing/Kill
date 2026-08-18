@@ -207,39 +207,33 @@ async def verify(interaction: discord.Interaction):
     view.add_item(discord.ui.Button(label="✅ 인증하러 가기", url=auth_url, style=discord.ButtonStyle.link))
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-# ✅ 핵심 변경: on_ready 안에서 Flask를 나중에 시작!
+# ✅ 핵심: 글로벌 명령어 먼저 등록!
 @bot.event
 async def on_ready():
     print("\n" + "="*60)
     print(f"✅ ✅ ✅ 7단계: on_ready 실행! 봇 로그인 성공: {bot.user}")
     print(f"discord.py 버전: {discord.__version__}")
     
-    # ✅ 봇이 완전히 준비된 다음에 Flask 시작!
     threading.Thread(target=run_flask, daemon=True).start()
     print("✅ Flask 쓰레드 시작 완료!")
     
-    # ✅ 명령어 등록
-    if GUILD_ID != 0:
-        print(f"✅ 8단계: 서버 명령어 등록 시도 중... GUILD_ID={GUILD_ID}")
-        try:
-            guild = discord.Object(id=GUILD_ID)
-            await tree.sync(guild=guild)
-            print("✅ ✅ ✅ 9단계: /verify 서버 명령어 등록 완료!")
-        except Exception as e:
-            print(f"❌ 서버 명령어 등록 오류: {e}")
-            print("✅ 글로벌 명령어로 다시 시도 중...")
+    # ✅ 글로벌 명령어 먼저 강제 등록!
+    print("✅ 8단계: 글로벌 명령어 등록 시도 중...")
+    try:
+        await tree.sync()
+        print("✅ ✅ ✅ 9단계: /verify 글로벌 명령어 등록 완료!")
+        print("ℹ️ 글로벌 명령어는 디스코드 전체에 전파되는 데 최대 1시간 걸릴 수 있으나, 보통 5~10분 내에 보입니다!")
+    except Exception as e:
+        print(f"❌ 글로벌 명령어 등록 오류: {e}")
+        # ✅ 실패시 서버 특정 명령어로 시도
+        if GUILD_ID != 0:
+            print(f"✅ 서버 명령어로 다시 시도 중... GUILD_ID={GUILD_ID}")
             try:
-                await tree.sync()
-                print("✅ ✅ ✅ 9단계: /verify 글로벌 명령어 등록 완료! (최대 1시간 걸릴 수 있음)")
+                guild = discord.Object(id=GUILD_ID)
+                await tree.sync(guild=guild)
+                print("✅ ✅ ✅ 9단계: /verify 서버 명령어 등록 완료!")
             except Exception as e2:
-                print(f"❌ 글로벌 명령어 등록 오류: {e2}")
-    else:
-        print("⚠️ GUILD_ID가 0임! 글로벌 명령어로 등록 시도...")
-        try:
-            await tree.sync()
-            print("✅ ✅ ✅ 9단계: /verify 글로벌 명령어 등록 완료!")
-        except Exception as e:
-            print(f"❌ 글로벌 명령어 등록 오류: {e}")
+                print(f"❌ 서버 명령어 등록 오류: {e2}")
     
     print("="*60 + "\n")
 
@@ -249,5 +243,4 @@ def run_flask():
 
 if __name__ == "__main__":
     print("✅ 0단계: 프로그램 시작!")
-    # ✅ 이제 bot.run()이 먼저 실행! Flask는 on_ready 안에서 나중에 시작!
     bot.run(DISCORD_BOT_TOKEN)
