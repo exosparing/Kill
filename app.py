@@ -207,13 +207,18 @@ async def verify(interaction: discord.Interaction):
     view.add_item(discord.ui.Button(label="✅ 인증하러 가기", url=auth_url, style=discord.ButtonStyle.link))
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
+# ✅ 핵심 변경: on_ready 안에서 Flask를 나중에 시작!
 @bot.event
 async def on_ready():
     print("\n" + "="*60)
     print(f"✅ ✅ ✅ 7단계: on_ready 실행! 봇 로그인 성공: {bot.user}")
     print(f"discord.py 버전: {discord.__version__}")
     
-    # ✅ 먼저 서버 특정 명령어 시도
+    # ✅ 봇이 완전히 준비된 다음에 Flask 시작!
+    threading.Thread(target=run_flask, daemon=True).start()
+    print("✅ Flask 쓰레드 시작 완료!")
+    
+    # ✅ 명령어 등록
     if GUILD_ID != 0:
         print(f"✅ 8단계: 서버 명령어 등록 시도 중... GUILD_ID={GUILD_ID}")
         try:
@@ -244,6 +249,5 @@ def run_flask():
 
 if __name__ == "__main__":
     print("✅ 0단계: 프로그램 시작!")
-    threading.Thread(target=run_flask, daemon=True).start()
-    print("✅ Flask 쓰레드 시작 완료!")
+    # ✅ 이제 bot.run()이 먼저 실행! Flask는 on_ready 안에서 나중에 시작!
     bot.run(DISCORD_BOT_TOKEN)
