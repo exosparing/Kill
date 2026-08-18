@@ -2,10 +2,8 @@ import os
 import re
 import sqlite3
 import requests
-import csv
-from io import StringIO
 import threading
-from flask import Flask, redirect, url_for, session, request, render_template_string, make_response
+from flask import Flask, redirect, url_for, session, request, render_template_string
 from datetime import datetime, timedelta
 import discord
 from discord import app_commands
@@ -13,7 +11,6 @@ from discord import app_commands
 app = Flask(__name__)
 app.secret_key = "secure_dashboard_secret_key_string_!@#$"
 
-# ✅ 세션 보안 강화 설정
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
@@ -42,7 +39,6 @@ intents.members = True
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 
-# ✅ DB 초기화
 def init_db():
     conn = sqlite3.connect("users.db")
     c = conn.cursor()
@@ -60,7 +56,6 @@ def init_db():
 
 init_db()
 
-# ✅ 인증 페이지
 @app.route("/")
 def home():
     auth_url = f"{DISCORD_AUTH_URL}?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&scope=identify%20email"
@@ -84,7 +79,6 @@ def home():
     </html>
     """, auth_url=auth_url)
 
-# ✅ 콜백 — 인증 처리
 @app.route("/callback")
 def callback():
     code = request.args.get("code")
@@ -131,7 +125,6 @@ def callback():
         print("DB 오류:", e)
     conn.close()
 
-    # ✅ 일반 채널 웹훅
     if DISCORD_WEBHOOK_URL:
         embed = {
             "title": "✅ 새로운 인증 완료",
@@ -147,7 +140,6 @@ def callback():
         }
         requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
 
-    # ✅ 관리자 채널 웹훅
     if ADMIN_WEBHOOK_URL:
         admin_embed = {
             "title": "🔐 관리자용 — 인증 상세 정보",
@@ -163,7 +155,6 @@ def callback():
         }
         requests.post(ADMIN_WEBHOOK_URL, json={"embeds": [admin_embed]})
 
-    # ✅ 역할 부여
     async def give_role():
         try:
             guild = await bot.fetch_guild(GUILD_ID)
@@ -195,7 +186,6 @@ def callback():
     </html>
     """)
 
-# ✅ /verify 명령어
 @tree.command(name="verify", description="서버 인증을 진행합니다")
 async def verify(interaction: discord.Interaction):
     auth_url = "https://kill-xqmz.onrender.com/"
@@ -208,15 +198,13 @@ async def verify(interaction: discord.Interaction):
     view.add_item(discord.ui.Button(label="✅ 인증하러 가기", url=auth_url, style=discord.ButtonStyle.link))
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-# ✅ 봇 시작 — 명령어 강제 동기화
 @bot.event
 async def on_ready():
+    print(f"✅ 봇 로그인 성공: {bot.user}")
     guild = discord.Object(id=GUILD_ID)
     await tree.sync(guild=guild)
-    print(f"✅ 명령어 강제 동기화 완료!")
-    print(f"✅ 봇 로그인 성공: {bot.user}")
+    print(f"✅ /verify 명령어 강제 등록 완료! 서버 ID: {GUILD_ID}")
 
-# ✅ 웹서버 실행
 def run_flask():
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
