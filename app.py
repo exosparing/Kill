@@ -3,7 +3,6 @@ import re
 import sqlite3
 import requests
 import threading
-import asyncio
 from flask import Flask, redirect, url_for, session, request, render_template_string
 from datetime import datetime, timedelta
 import discord
@@ -17,7 +16,6 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
 app.config['SESSION_COOKIE_SECURE'] = True
 
-# =========================================================================
 CLIENT_ID = os.getenv("CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET", "")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
@@ -27,7 +25,6 @@ GUILD_ID = 1537869964554281020
 VERIFY_ROLE_ID = 1537896063812247674
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 ADMIN_DISCORD_ID = "1513116439563997264"
-# =========================================================================
 
 DISCORD_AUTH_URL = "https://discord.com/api/oauth2/authorize"
 DISCORD_TOKEN_URL = "https://discord.com/api/oauth2/token"
@@ -167,7 +164,12 @@ def callback():
         except Exception as e:
             print(f"❌ 역할 부여 오류: {e}")
 
-    threading.Thread(target=lambda: bot.loop.create_task(give_role())).start()
+    if bot.is_ready():
+        bot.loop.create_task(give_role())
+    else:
+        @bot.event
+        async def on_ready_temp():
+            await give_role()
 
     return render_template_string("""
     <!DOCTYPE html>
@@ -199,17 +201,21 @@ async def verify(interaction: discord.Interaction):
     view.add_item(discord.ui.Button(label="✅ 인증하러 가기", url=auth_url, style=discord.ButtonStyle.link))
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
+# ✅ on_ready를 제일 위에 둬서 무조건 실행되게 함!
 @bot.event
 async def on_ready():
-    print(f"✅ 봇 로그인 성공: {bot.user}")
+    print("="*50)
+    print(f"✅ ✅ ✅ 봇 로그인 성공: {bot.user}")
     guild = discord.Object(id=GUILD_ID)
     await tree.sync(guild=guild)
     print(f"✅ ✅ ✅ /verify 명령어 등록 완료! 이제 사용 가능!")
+    print("="*50)
 
 def run_flask():
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
+    # ✅ 봇을 먼저 실행! on_ready가 제일 먼저 실행됨!
     threading.Thread(target=run_flask, daemon=True).start()
     bot.run(DISCORD_BOT_TOKEN)
