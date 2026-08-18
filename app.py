@@ -3,6 +3,7 @@ import re
 import sqlite3
 import requests
 import threading
+import asyncio
 from flask import Flask, redirect, url_for, session, request, render_template_string
 from datetime import datetime, timedelta
 import discord
@@ -203,7 +204,7 @@ async def on_ready():
     print(f"✅ 봇 로그인 성공: {bot.user}")
     guild = discord.Object(id=GUILD_ID)
     await tree.sync(guild=guild)
-    print(f"✅ /verify 명령어 강제 등록 완료! 서버 ID: {GUILD_ID}")
+    print(f"✅ ✅ ✅ /verify 명령어 등록 완료! 이제 사용 가능!")
 
 def run_flask():
     port = int(os.getenv("PORT", 5000))
