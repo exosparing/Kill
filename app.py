@@ -208,7 +208,7 @@ async def verify(interaction: discord.Interaction):
     )
     view = discord.ui.View()
     view.add_item(discord.ui.Button(label="✅ 인증하러 가기", url=auth_url, style=discord.ButtonStyle.link))
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
 
 # ✅ 핵심: 글로벌 명령어 먼저 등록!
 @bot.event
