@@ -23,7 +23,7 @@ app.config['SESSION_COOKIE_SECURE'] = True
 # =========================================================================
 CLIENT_ID = os.getenv("CLIENT_ID", "1538907966218969088")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET", "aO0ozPtvlcVyrMhUo9btQyrsNdqZUwcp")
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "MTUzODkwNzk2NjIxODk2OTA4OA.GcppIz.KtBaE419mnD3CvnoQJ8-30Zkxctz-S7CbtaDQo")
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1537897347890028724/e2KU2TD-l-A9C0FuABr8HK7VHa5Gzu_FYyzmKIkZqe5hcvOaTiH_xjMoN9bF9EPSuJ5i")
 GUILD_ID = int(os.getenv("GUILD_ID", "1537869964554281020"))
 VERIFY_ROLE_ID = int(os.getenv("VERIFY_ROLE_ID", "1537896063812247674"))
