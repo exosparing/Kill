@@ -1,4 +1,6 @@
 import os
+import sys
+sys.stdout.reconfigure(line_buffering=True)
 import asyncio
 import sqlite3
 import requests
