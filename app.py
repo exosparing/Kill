@@ -1,4 +1,5 @@
 import os
+import asyncio
 import sqlite3
 import requests
 import threading
@@ -225,14 +226,18 @@ async def on_ready():
         if GUILD_ID != 0:
             guild = discord.Object(id=GUILD_ID)
             tree.copy_global_to(guild=guild)
-            await tree.sync(guild=guild)
+            # ✅ [수정] sync()가 응답 없이 멈추는 경우를 대비해 타임아웃을 걸어
+            #    무한 대기 대신 명확한 에러 로그가 찍히도록 함
+            await asyncio.wait_for(tree.sync(guild=guild), timeout=20)
             print("✅ ✅ ✅ 9단계: /verify 길드 명령어 등록 완료! (즉시 반영)")
         else:
             # GUILD_ID가 없을 때만 글로벌로 폴백 (최대 1시간 전파)
-            await tree.sync()
+            await asyncio.wait_for(tree.sync(), timeout=20)
             print("✅ ✅ ✅ 9단계: /verify 글로벌 명령어 등록 완료! (전파까지 최대 1시간)")
+    except asyncio.TimeoutError:
+        print("❌ 명령어 등록 타임아웃! 20초 동안 디스코드로부터 응답이 없었습니다. (네트워크/토큰 권한 문제 의심)")
     except Exception as e:
-        print(f"❌ 명령어 등록 오류: {e}")
+        print(f"❌ 명령어 등록 오류: {type(e).__name__}: {e}")
     
     print("="*60 + "\n")
 
